@@ -109,9 +109,7 @@ def get_match_predictions(match_row, odds_data):
     predictions = {
         'halftime_fulltime': predictor.predict_halftime_fulltime(home_stats, away_stats, odds_data),
         'halftime_score': predictor.predict_halftime_score(home_stats, away_stats, odds_data),
-        'fulltime_score': predictor.predict_fulltime_
-
-        score(home_stats, away_stats, odds_data)
+        'fulltime_score': predictor.predict_fulltime_score(home_stats, away_stats, odds_data)
     }
     
     return predictions
