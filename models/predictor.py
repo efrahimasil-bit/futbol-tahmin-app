@@ -1,9 +1,5 @@
-"""
-Tahmin modeli - İstatistiksel + ML kombinasyonu
-"""
-
+"""Futbol Maç Tahmin Modeli"""
 import numpy as np
-import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 import config
@@ -11,170 +7,283 @@ import config
 class FootballPredictor:
     def __init__(self):
         self.rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
-        self.lr_model = LogisticRegression(max_iter=1000, random_state=42)
+        self.lr_model = LogisticRegression(random_state=42)
         self.is_trained = False
     
+    def train(self, X, y):
+        """Modeli eğit"""
+        if X is None or y is None or len(X) == 0:
+            return False
+        
+        try:
+            self.rf_model.fit(X, y)
+            self.lr_model.fit(X, y)
+            self.is_trained = True
+            return True
+        except Exception as e:
+            print(f"Eğitim hatası: {e}")
+            return False
+    
     def predict_halftime_fulltime(self, home_stats, away_stats, odds_data):
-        """İlk yarı / Maç sonucu tahmini"""
+        """İlk yarı / Maç sonucu tahminleri"""
+        # Olası kombinasyonlar
+        outcomes = [
+            'H/H', 'H/D', 'H/A',  # Ev sahibi önde
+            'D/H', 'D/D', 'D/A',  # Berabere
+            'A/H', 'A/D', 'A/A'   # Deplasman önde
+        ]
+        
+        # Temel olasılıklar hesapla
+        base_probs = self._calculate_ht_ft_probabilities(home_stats, away_stats)
+        
         predictions = []
         
-        # İstatistiksel yaklaşım
-        for outcome in config.HALFTIME_FULLTIME_OUTCOMES:
-            probability = self._calculate_ht_ft_probability(
-                outcome, home_stats, away_stats, odds_data
-            )
+        for outcome in outcomes:
+            # Oran verisinden al veya varsayılan kullan
+            odds_key = outcome.replace('/', '/')
             
-            odds = odds_data.get('halftime_fulltime', {}).get(outcome, 10.0)
-            confidence = self._determine_confidence(probability)
+            if 'halftime_fulltime' in odds_data and outcome in odds_data['halftime_fulltime']:
+                odds = odds_data['halftime_fulltime'][outcome]
+            else:
+                odds = self._get_default_ht_ft_odds(outcome)
+            
+            probability = base_probs.get(outcome, 5.0)
+            expected_value = (probability / 100) * odds
+            
+            # Güven seviyesi
+            if probability > 20:
+                confidence = 'high'
+            elif probability > 10:
+                confidence = 'medium'
+            else:
+                confidence = 'low'
+            
+            # Outcome'u açıklamalı hale getir
+            outcome_text = self._format_ht_ft_outcome(outcome)
             
             predictions.append({
-                'outcome': outcome,
-                'probability': probability * 100,
+                'outcome': outcome_text,
+                'probability': probability,
                 'odds': odds,
+                'expected_value': expected_value,
                 'confidence': confidence
             })
         
-        # Normalize probabilities
-        total_prob = sum(p['probability'] for p in predictions)
-        for p in predictions:
-            p['probability'] = (p['probability'] / total_prob) * 100
+        # Expected value'ya göre sırala
+        predictions.sort(key=lambda x: x['expected_value'], reverse=True)
         
-        return sorted(predictions, key=lambda x: x['probability'], reverse=True)
+        return predictions
     
     def predict_halftime_score(self, home_stats, away_stats, odds_data):
-        """İlk yarı skor tahmini"""
+        """İlk yarı skor tahminleri"""
+        # İlk yarı gol ortalamaları (genelde daha düşük)
+        home_ht_avg = home_stats.get('first_half_goals_avg', 0.7)
+        away_ht_avg = away_stats.get('first_half_goals_avg', 0.6)
+        
+        # Poisson ile olasılıklar
+        score_probs = self._poisson_probabilities(home_ht_avg, away_ht_avg, max_goals=3)
+        
         predictions = []
         
-        for score in config.HALFTIME_SCORES:
-            probability = self._calculate_score_probability(
-                score, home_stats, away_stats, is_halftime=True
-            )
+        for score, probability in score_probs.items():
+            if probability < 2.0:  # Çok düşük olasılıkları atla
+                continue
             
-            odds = odds_data.get('correct_score', {}).get(score, 15.0)
-            confidence = self._determine_confidence(probability)
+            # Oran verisinden al veya hesapla
+            if 'correct_score' in odds_data and score in odds_data['correct_score']:
+                odds = odds_data['correct_score'][score]
+            else:
+                odds = self._estimate_score_odds(probability)
+            
+            expected_value = (probability / 100) * odds
+            
+            # Güven seviyesi
+            if probability > 20:
+                confidence = 'high'
+            elif probability > 10:
+                confidence = 'medium'
+            else:
+                confidence = 'low'
             
             predictions.append({
                 'outcome': score,
-                'probability': probability * 100,
+                'probability': probability,
                 'odds': odds,
+                'expected_value': expected_value,
                 'confidence': confidence
             })
         
-        # Normalize
-        total_prob = sum(p['probability'] for p in predictions)
-        for p in predictions:
-            p['probability'] = (p['probability'] / total_prob) * 100
+        predictions.sort(key=lambda x: x['expected_value'], reverse=True)
         
-        return sorted(predictions, key=lambda x: x['probability'], reverse=True)
+        return predictions[:15]  # İlk 15 tahmini döndür
     
     def predict_fulltime_score(self, home_stats, away_stats, odds_data):
-        """Maç sonu skor tahmini"""
+        """Maç sonu skor tahminleri"""
+        # Tam maç gol ortalamaları
+        home_avg = home_stats.get('goals_scored_avg', 1.5)
+        away_avg = away_stats.get('goals_scored_avg', 1.3)
+        
+        # Ev sahibi avantajını ekle
+        home_avg = home_avg * (1 + home_stats.get('home_advantage', 0.15))
+        
+        # Poisson ile olasılıklar
+        score_probs = self._poisson_probabilities(home_avg, away_avg, max_goals=5)
+        
         predictions = []
         
-        for score in config.FULLTIME_SCORES:
-            probability = self._calculate_score_probability(
-                score, home_stats, away_stats, is_halftime=False
-            )
+        for score, probability in score_probs.items():
+            if probability < 1.5:  # Çok düşük olasılıkları atla
+                continue
             
-            odds = odds_data.get('correct_score', {}).get(score, 12.0)
-            confidence = self._determine_confidence(probability)
+            # Oran verisinden al veya hesapla
+            if 'correct_score' in odds_data and score in odds_data['correct_score']:
+                odds = odds_data['correct_score'][score]
+            else:
+                odds = self._estimate_score_odds(probability)
+            
+            expected_value = (probability / 100) * odds
+            
+            # Güven seviyesi
+            if probability > 15:
+                confidence = 'high'
+            elif probability > 8:
+                confidence = 'medium'
+            else:
+                confidence = 'low'
             
             predictions.append({
                 'outcome': score,
-                'probability': probability * 100,
+                'probability': probability,
                 'odds': odds,
+                'expected_value': expected_value,
                 'confidence': confidence
             })
         
-        # Normalize
-        total_prob = sum(p['probability'] for p in predictions)
-        for p in predictions:
-            p['probability'] = (p['probability'] / total_prob) * 100
+        predictions.sort(key=lambda x: x['expected_value'], reverse=True)
         
-        return sorted(predictions, key=lambda x: x['probability'], reverse=True)
+        return predictions[:20]  # İlk 20 tahmini döndür
     
-    def _calculate_ht_ft_probability(self, outcome, home_stats, away_stats, odds_data):
-        """İY/MS olasılık hesaplama"""
-        # Outcome parse et (örn: "1/1", "X/2", "0/0")
-        if '/' not in outcome:
-            return 0.05
+    def _calculate_ht_ft_probabilities(self, home_stats, away_stats):
+        """İlk yarı / Maç sonucu olasılıkları hesapla"""
+        # Basitleştirilmiş model
+        home_strength = home_stats.get('form', 0.5) + home_stats.get('home_advantage', 0.15)
+        away_strength = away_stats.get('form', 0.5)
         
-        ht, ft = outcome.split('/')
+        probs = {
+            'H/H': 18 + home_strength * 10,  # Ev önde başlar, ev kazanır
+            'H/D': 8 + home_strength * 5,    # Ev önde başlar, berabere
+            'H/A': 4,                          # Ev önde başlar, deplasman kazanır
+            'D/H': 15 + home_strength * 8,   # Berabere başlar, ev kazanır
+            'D/D': 20,                         # Berabere başlar, berabere biter
+            'D/A': 12 + away_strength * 8,   # Berabere başlar, deplasman kazanır
+            'A/H': 3,                          # Deplasman önde, ev kazanır
+            'A/D': 7 + away_strength * 5,    # Deplasman önde, berabere
+            'A/A': 13 + away_strength * 10   # Deplasman önde, deplasman kazanır
+        }
         
-        # İlk yarı analizi
-        ht_home_goal_avg = home_stats.get('ht_goals_scored_5', 0.6)
-        ht_away_goal_avg = away_stats.get('ht_goals_scored_5', 0.5)
+        # Normalize et
+        total = sum(probs.values())
+        for key in probs:
+            probs[key] = (probs[key] / total) * 100
         
-        # Maç sonu analizi
-        ft_home_goal_avg = home_stats.get('goals_scored_5', 1.2)
-        ft_away_goal_avg = away_stats.get('goals_scored_5', 1.1)
-        
-        # Rule-based probability
-        base_prob = 0.05
-        
-        if ht == '1':  # İY Ev sahibi önde
-            base_prob += home_stats.get('ht_lead_pct', 0.3)
-        elif ht == 'X':  # İY Berabere
-            base_prob += home_stats.get('ht_draw_pct', 0.35) * 0.5
-            base_prob += away_stats.get('ht_draw_pct', 0.35) * 0.5
-        elif ht == '2':  # İY Deplasman önde
-            base_prob += away_stats.get('ht_lead_pct', 0.25)
-        elif ht == '0':  # İY Berabere (0-0 özel durum)
-            ht_draw_pct = (home_stats.get('ht_draw_pct', 0.35) + away_stats.get('ht_draw_pct', 0.35)) / 2
-            base_prob += ht_draw_pct * 0.8
-        
-        # Maç sonu
-        if ft == '1':  # MS Ev sahibi kazanır
-            if ft_home_goal_avg > ft_away_goal_avg:
-                base_prob += 0.15
-        elif ft == 'X':  # MS Berabere
-            if abs(ft_home_goal_avg - ft_away_goal_avg) < 0.3:
-                base_prob += 0.10
-        elif ft == '2':  # MS Deplasman kazanır
-            if ft_away_goal_avg > ft_home_goal_avg:
-                base_prob += 0.12
-        elif ft == '0':  # MS Berabere (0-0 özel)
-            if ft_home_goal_avg < 1.0 and ft_away_goal_avg < 1.0:
-                base_prob += 0.08
-        
-        # Oran etkisi
-        current_odds = odds_data.get('halftime_fulltime', {}).get(outcome)
-        if current_odds:
-            implied_prob = 1.0 / current_odds
-            base_prob = (base_prob * 0.7) + (implied_prob * 0.3)
-        
-        return max(0.01, min(base_prob, 0.95))
+        return probs
     
-    def _calculate_score_probability(self, score, home_stats, away_stats, is_halftime=False):
-        """Skor olasılık hesaplama (Poisson dağılımı yaklaşımı)"""
-        if '-' not in score:
-            return 0.02
-        
-        home_goals, away_goals = map(int, score.split('-'))
-        
-        if is_halftime:
-            lambda_home = home_stats.get('ht_goals_scored_5', 0.6)
-            lambda_away = away_stats.get('ht_goals_scored_5', 0.5)
-        else:
-            lambda_home = home_stats.get('goals_scored_5', 1.2)
-            lambda_away = away_stats.get('goals_scored_5', 1.1)
-        
-        # Poisson olasılığı
-        prob_home = self._poisson_probability(home_goals, lambda_home)
-        prob_away = self._poisson_probability(away_goals, lambda_away)
-        
-        return prob_home * prob_away
-    
-    def _poisson_probability(self, k, lambda_):
-        """Poisson dağılımı"""
+    def _poisson_probabilities(self, home_avg, away_avg, max_goals=5):
+        """Poisson dağılımı ile skor olasılıkları"""
         from math import exp, factorial
-        return (lambda_ ** k) * exp(-lambda_) / factorial(k)
+        
+        def poisson(expected, actual):
+            return (expected ** actual * exp(-expected)) / factorial(actual)
+        
+        probabilities = {}
+        
+        for home_goals in range(max_goals + 1):
+            for away_goals in range(max_goals + 1):
+                prob = poisson(home_avg, home_goals) * poisson(away_avg, away_goals)
+                score = f"{home_goals}-{away_goals}"
+                probabilities[score] = prob * 100
+        
+        return probabilities
     
-    def _determine_confidence(self, probability):
-        """Güven seviyesi belirle"""
-        if probability >= config.HIGH_CONFIDENCE_THRESHOLD:
-            return 'high'
-        elif probability >= config.MEDIUM_CONFIDENCE_THRESHOLD:
-            return 'medium'
-        else:
-            return 'low'
+    def _get_default_ht_ft_odds(self, outcome):
+        """Varsayılan İY/MS oranları"""
+        default_odds = {
+            'H/H': 3.5, 'H/D': 8.0, 'H/A': 15.0,
+            'D/H': 4.5, 'D/D': 3.2, 'D/A': 4.5,
+            'A/H': 15.0, 'A/D': 8.0, 'A/A': 3.8
+        }
+        return default_odds.get(outcome, 10.0)
+    
+    def _estimate_score_odds(self, probability):
+        """Olasılıktan oran tahmini"""
+        if probability <= 0:
+            return 50.0
+        
+        # Basit oran hesaplama: 100 / olasılık
+        odds = 100 / probability
+        
+        # Bahis sitesi marjı ekle (%10)
+        odds = odds * 0.9
+        
+        return max(1.01, round(odds, 2))
+    
+    def _format_ht_ft_outcome(self, outcome):
+        """İY/MS sonucunu formatla"""
+        mapping = {
+            'H/H': '1/1 (Ev Sahibi/Ev Sahibi)',
+            'H/D': '1/X (Ev Sahibi/Beraberlik)',
+            'H/A': '1/2 (Ev Sahibi/Deplasman)',
+            'D/H': 'X/1 (Beraberlik/Ev Sahibi)',
+            'D/D': 'X/X (Beraberlik/Beraberlik)',
+            'D/A': 'X/2 (Beraberlik/Deplasman)',
+            'A/H': '2/1 (Deplasman/Ev Sahibi)',
+            'A/D': '2/X (Deplasman/Beraberlik)',
+            'A/A': '2/2 (Deplasman/Deplasman)'
+        }
+        return mapping.get(outcome, outcome)
+    
+    def predict_match_winner(self, home_stats, away_stats, odds_data):
+        """Maç sonucu tahmini"""
+        # Güç hesapla
+        home_strength = (
+            home_stats['goals_scored_avg'] * 0.3 +
+            (3 - home_stats['goals_conceded_avg']) * 0.3 +
+            home_stats['form'] * 0.2 +
+            home_stats['home_advantage'] * 0.2
+        )
+        
+        away_strength = (
+            away_stats['goals_scored_avg'] * 0.3 +
+            (3 - away_stats['goals_conceded_avg']) * 0.3 +
+            away_stats['form'] * 0.3
+        )
+        
+        total = home_strength + away_strength
+        
+        home_win_prob = (home_strength / total) * 55  # Ev avantajı
+        away_win_prob = (away_strength / total) * 45
+        draw_prob = 100 - home_win_prob - away_win_prob
+        
+        predictions = []
+        
+        outcomes = {
+            'home_win': ('Ev Sahibi Kazanır', home_win_prob),
+            'draw': ('Beraberlik', draw_prob),
+            'away_win': ('Deplasman Kazanır', away_win_prob)
+        }
+        
+        for key, (label, prob) in outcomes.items():
+            odds = odds_data.get(key, 2.5)
+            ev = (prob / 100) * odds
+            
+            predictions.append({
+                'outcome': label,
+                'probability': prob,
+                'odds': odds,
+                'expected_value': ev,
+                'confidence': 'high' if prob > 40 else 'medium' if prob > 25 else 'low'
+            })
+        
+        predictions.sort(key=lambda x: x['probability'], reverse=True)
+        
+        return predictions
