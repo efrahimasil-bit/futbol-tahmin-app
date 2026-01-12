@@ -1,49 +1,51 @@
-"""
-Konfigürasyon dosyası - API anahtarları ve ayarlar
-"""
+"""Konfigürasyon Ayarları"""
+import os
 
-# API Anahtarları (Kendi anahtarlarınızı buraya ekleyin)
-API_FOOTBALL_KEY = "YOUR_API_FOOTBALL_KEY_HERE"
-SPORTMONKS_KEY = "YOUR_SPORTMONKS_KEY_HERE"
+# API Ayarları
+API_FOOTBALL_KEY = os.getenv('API_FOOTBALL_KEY', 'YOUR_API_KEY_HERE')
+API_FOOTBALL_BASE_URL = 'https://v3.football.api-sports.io'
 
-# API Endpoints
-API_FOOTBALL_BASE = "https://v3.football.api-sports.io"
-SPORTMONKS_BASE = "https://api.sportmonks.com/v3/football"
+# Cache Ayarları
+CACHE_TTL = 300  # 5 dakika
 
 # Uygulama Ayarları
-REFRESH_INTERVAL = 300  # 5 dakika (saniye)
 MAX_MATCHES_DISPLAY = 20
-CACHE_TTL = 300  # Cache süresi (saniye)
+DEFAULT_TIMEZONE = 'Europe/Istanbul'
 
-# Tahmin Ayarları
-MIN_CONFIDENCE_THRESHOLD = 0.15
-HIGH_CONFIDENCE_THRESHOLD = 0.25
-MEDIUM_CONFIDENCE_THRESHOLD = 0.18
-
-# Güven seviyeleri için renkler
-CONFIDENCE_COLORS = {
-    'high': '#22c55e',    # Yeşil
-    'medium': '#eab308',  # Sarı
-    'low': '#ef4444'      # Kırmızı
+# Tahmin Parametreleri
+CONFIDENCE_THRESHOLDS = {
+    'high': 0.70,
+    'medium': 0.50,
+    'low': 0.30
 }
 
-# İlk yarı/Maç sonucu kombinasyonları
-HALFTIME_FULLTIME_OUTCOMES = [
-    '1/1', '1/X', '1/2',
-    'X/1', 'X/X', 'X/2',
-    '2/1', '2/X', '2/2',
-    '1/0', '2/0', '0/1', '0/2', '0/0'
+# Model Ayarları
+MODEL_FEATURES = [
+    'home_goals_avg',
+    'away_goals_avg',
+    'home_conceded_avg',
+    'away_conceded_avg',
+    'home_advantage',
+    'recent_form'
 ]
 
-# İlk yarı skor tahminleri
-HALFTIME_SCORES = [
-    '0-0', '1-0', '0-1', '1-1',
-    '2-0', '0-2', '2-1', '1-2', '2-2'
+# Desteklenen Ligler
+SUPPORTED_LEAGUES = [
+    39,   # Premier League
+    140,  # La Liga
+    78,   # Bundesliga
+    135,  # Serie A
+    61,   # Ligue 1
+    203,  # Süper Lig
+    88,   # Eredivisie
+    94,   # Primeira Liga
 ]
 
-# Maç sonu skor tahminleri
-FULLTIME_SCORES = [
-    '0-0', '1-0', '0-1', '2-0', '0-2',
-    '2-1', '1-2', '3-0', '0-3', '3-1',
-    '1-3', '2-2', '3-2', '2-3'
-]
+# Oran Tipleri
+ODDS_MARKETS = {
+    'match_winner': 1,
+    'halftime_fulltime': 6,
+    'correct_score': 9,
+    'goals_over_under': 5,
+    'both_teams_score': 8
+}
