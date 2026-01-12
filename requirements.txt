@@ -1,6 +1,18 @@
+# Streamlit ve Web Framework
 streamlit>=1.31.0
+
+# Veri İşleme
 pandas>=2.1.4
 numpy>=1.26.3
+
+# Machine Learning
 scikit-learn>=1.4.0
+
+# API İstekleri
 requests>=2.31.0
+
+# Tarih/Zaman İşlemleri
 python-dateutil>=2.8.2
+
+# Ortam Değişkenleri
+python-dotenv>=1.0.0
